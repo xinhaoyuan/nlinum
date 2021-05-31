@@ -104,7 +104,7 @@ if ARG is omitted or nil.
 Linum mode is a buffer-local minor mode."
   :lighter nil ;; (" NLinum" nlinum--desc)
   (jit-lock-unregister #'nlinum--region)
-  (remove-hook 'window-configuration-change-hook #'nlinum--setup-window :local)
+  (remove-hook 'window-configuration-change-hook #'nlinum--flush :local)
   (remove-hook 'text-scale-mode-hook #'nlinum--setup-window :local)
   (remove-hook 'after-change-functions #'nlinum--after-change :local)
   (remove-hook 'post-command-hook #'nlinum--current-line-update :local)
@@ -125,7 +125,7 @@ Linum mode is a buffer-local minor mode."
     ;; which might indeed be preferable.
     (add-hook 'change-major-mode-hook (lambda () (nlinum-mode -1)))
     (add-hook 'text-scale-mode-hook #'nlinum--setup-window nil :local)
-    (add-hook 'window-configuration-change-hook #'nlinum--setup-window nil t)
+    (add-hook 'window-configuration-change-hook #'nlinum--flush nil t)
     (add-hook 'after-change-functions #'nlinum--after-change nil :local)
     (add-hook 'pre-redisplay-functions #'nlinum--check-narrowing nil :local)
     (if nlinum-highlight-current-line
@@ -360,14 +360,18 @@ it may cause the margin to be resized and line numbers to be recomputed.")
     ;; that shouldn't prevent us from counting those lines.
     (let ((inhibit-point-motion-hooks t))
       (goto-char start)
-      (unless (bolp) (forward-line 1))
-      (remove-overlays (point) limit 'nlinum t)
-      (let ((line (nlinum--line-number-at-pos)))
+      (remove-overlays start limit 'nlinum t)
+      (let ((p (point)))
+        (vertical-motion 0)
+        (and (< (point) p) (vertical-motion 1)))
+      (let ((line (if (bolp) (nlinum--line-number-at-pos) (line-number-at-pos))))
         (while
             (and (not (eobp)) (< (point) limit)
                  (let* ((ol (make-overlay (point) (1+ (point))))
-                        (str (funcall nlinum-format-function
-                                      line nlinum--width))
+                        (bol (bolp))
+                        (str (let ((nlinum-format (if bol nlinum-format "┊")))
+                               (funcall nlinum-format-function
+                                        line nlinum--width)))
                         (width (string-width str))
                         (margin (if nlinum--using-right-margin
                                     'right-margin 'left-margin)))
@@ -376,15 +380,17 @@ it may cause the margin to be resized and line numbers to be recomputed.")
                      (nlinum--flush))
                    (overlay-put ol 'nlinum t)
                    (overlay-put ol 'evaporate t)
-                   (overlay-put ol 'before-string
+                   (overlay-put ol (if bol 'before-string 'after-string)
                                 (propertize " " 'display
                                             `((margin ,margin) ,str)))
                    ;; (setq nlinum--ol-counter (1- nlinum--ol-counter))
                    ;; (when (= nlinum--ol-counter 0)
                    ;;   (run-with-idle-timer 0.5 nil #'nlinum--flush-overlays
                    ;;                        (current-buffer)))
-                   (setq line (1+ line))
-                   (zerop (forward-line 1))))))))
+                   (prog1
+                       (eq 1 (vertical-motion 1))
+                     (if (bolp) (setq line (1+ line)) t))
+                   ))))))
   ;; (setq nlinum--desc (format "-%d" (nlinum--ol-count)))
   nil)
 
